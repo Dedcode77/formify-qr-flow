@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import FormsList from "./pages/FormsList";
 import FormBuilder from "./pages/FormBuilder";
 import Attendance from "./pages/Attendance";
+import PublicForm from "./pages/PublicForm";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/dashboard/forms/new" element={<FormBuilder />} />
           <Route path="/dashboard/forms/:id" element={<FormBuilder />} />
           <Route path="/dashboard/attendance" element={<Attendance />} />
+          <Route path="/f/:slug" element={<PublicForm />} />
           <Route path="/pricing" element={<Index />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
