@@ -28,15 +28,20 @@ import { FieldSettings } from '@/components/forms/FieldSettings';
 import { FormPreview } from '@/components/forms/FormPreview';
 import { useFormStore } from '@/stores/formStore';
 import { FieldType, FormField } from '@/types/form';
-import { ArrowLeft, Save, Eye, Settings, Layers } from 'lucide-react';
+import { ArrowLeft, Save, Eye, Settings, Layers, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
+import { useMutation } from '@tanstack/react-query';
 
 export default function FormBuilder() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { fields, selectedFieldId, addField, removeField, updateField, reorderFields, selectField } = useFormStore();
+  const { user, organization } = useAuth();
+  const { fields, selectedFieldId, addField, removeField, updateField, reorderFields, selectField, clearFields } = useFormStore();
   
   const [formName, setFormName] = useState('Nouveau formulaire');
+  const [formDescription, setFormDescription] = useState('');
   const [activeTab, setActiveTab] = useState('builder');
 
   const sensors = useSensors(
@@ -45,6 +50,51 @@ export default function FormBuilder() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!organization?.id || !user?.id) {
+        throw new Error('Organization or user not found');
+      }
+
+      const slug = formName.toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 50) + '-' + Date.now().toString(36);
+
+      const { data, error } = await supabase
+        .from('forms')
+        .insert({
+          organization_id: organization.id,
+          name: formName,
+          slug,
+          description: formDescription,
+          fields: fields as any,
+          created_by: user.id,
+          is_published: false,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Formulaire sauvegardé',
+        description: 'Votre formulaire a été créé avec succès.',
+      });
+      clearFields();
+      navigate('/dashboard/forms');
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Erreur',
+        description: error.message || 'Une erreur est survenue.',
+        variant: 'destructive',
+      });
+    },
+  });
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -94,10 +144,25 @@ export default function FormBuilder() {
   const selectedField = fields.find((f) => f.id === selectedFieldId);
 
   const handleSave = () => {
-    toast({
-      title: 'Formulaire sauvegardé',
-      description: 'Vos modifications ont été enregistrées.',
-    });
+    if (!formName.trim()) {
+      toast({
+        title: 'Erreur',
+        description: 'Veuillez donner un nom à votre formulaire.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (fields.length === 0) {
+      toast({
+        title: 'Erreur',
+        description: 'Ajoutez au moins un champ à votre formulaire.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    saveMutation.mutate();
   };
 
   return (
@@ -126,9 +191,13 @@ export default function FormBuilder() {
               <Eye className="w-4 h-4 mr-2" />
               Aperçu
             </Button>
-            <Button variant="hero" onClick={handleSave}>
-              <Save className="w-4 h-4 mr-2" />
-              Sauvegarder
+            <Button variant="hero" onClick={handleSave} disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              <span className="ml-2">Sauvegarder</span>
             </Button>
           </div>
         </div>
@@ -224,7 +293,9 @@ export default function FormBuilder() {
             <Card className="max-w-2xl mx-auto">
               <CardContent className="p-8">
                 <h2 className="text-2xl font-bold mb-2">{formName}</h2>
-                <p className="text-muted-foreground mb-8">Remplissez le formulaire ci-dessous</p>
+                {formDescription && (
+                  <p className="text-muted-foreground mb-8">{formDescription}</p>
+                )}
                 <FormPreview fields={fields} />
                 {fields.length > 0 && (
                   <Button variant="hero" className="w-full mt-8" disabled>
@@ -248,15 +319,8 @@ export default function FormBuilder() {
                   <textarea 
                     className="w-full min-h-[100px] px-3 py-2 rounded-lg border bg-background resize-none"
                     placeholder="Décrivez votre formulaire..."
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>URL du formulaire</Label>
-                  <Input 
-                    value={`formy.app/f/${formName.toLowerCase().replace(/\s+/g, '-')}`} 
-                    readOnly 
-                    className="bg-muted"
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
                   />
                 </div>
               </CardContent>
