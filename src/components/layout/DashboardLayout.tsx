@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -11,9 +11,10 @@ import {
   Settings, 
   LogOut,
   ChevronLeft,
-  Menu
+  Menu,
+  Loader2
 } from 'lucide-react';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
 interface DashboardLayoutProps {
@@ -33,12 +34,35 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, organization, logout } = useAuthStore();
+  const { user, profile, organization, isLoading, isAuthenticated, signOut } = useAuth();
 
-  const handleLogout = () => {
-    logout();
+  // Redirect to auth if not authenticated
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      navigate('/auth');
+    }
+  }, [isLoading, isAuthenticated, navigate]);
+
+  const handleLogout = async () => {
+    await signOut();
     navigate('/');
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
+  const orgName = organization?.name || 'Mon Workspace';
+  const plan = organization?.plan || 'free';
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -86,12 +110,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* User section */}
         <div className="p-4 border-t">
-          {!isCollapsed && user && (
+          {!isCollapsed && (
             <div className="mb-4 p-3 rounded-lg bg-muted/50">
-              <p className="font-medium text-sm truncate">{user.name}</p>
-              <p className="text-xs text-muted-foreground truncate">{organization?.name}</p>
+              <p className="font-medium text-sm truncate">{displayName}</p>
+              <p className="text-xs text-muted-foreground truncate">{orgName}</p>
               <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary capitalize">
-                {user.plan}
+                {plan}
               </span>
             </div>
           )}

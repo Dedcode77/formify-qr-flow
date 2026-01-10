@@ -24,7 +24,9 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/hooks/useAuth';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 const responseData = [
   { name: 'Lun', responses: 45 },
@@ -44,19 +46,51 @@ const attendanceData = [
   { name: 'Ven', present: 44, absent: 6 },
 ];
 
-const recentForms = [
-  { id: '1', name: 'Formulaire de satisfaction', responses: 127, lastUpdate: 'Il y a 2h' },
-  { id: '2', name: 'Inscription événement', responses: 45, lastUpdate: 'Il y a 5h' },
-  { id: '3', name: 'Feedback produit', responses: 89, lastUpdate: 'Hier' },
-];
-
 export default function Dashboard() {
-  const { user } = useAuthStore();
+  const { profile, organization } = useAuth();
+
+  // Fetch forms count
+  const { data: formsData } = useQuery({
+    queryKey: ['forms-count', organization?.id],
+    queryFn: async () => {
+      if (!organization?.id) return { count: 0, forms: [] };
+      const { data, count } = await supabase
+        .from('forms')
+        .select('*', { count: 'exact' })
+        .eq('organization_id', organization.id)
+        .order('updated_at', { ascending: false })
+        .limit(3);
+      return { count: count || 0, forms: data || [] };
+    },
+    enabled: !!organization?.id,
+  });
+
+  // Fetch responses count
+  const { data: responsesCount } = useQuery({
+    queryKey: ['responses-count', organization?.id],
+    queryFn: async () => {
+      if (!organization?.id) return 0;
+      const { data: forms } = await supabase
+        .from('forms')
+        .select('id')
+        .eq('organization_id', organization.id);
+      
+      if (!forms?.length) return 0;
+      
+      const { count } = await supabase
+        .from('form_responses')
+        .select('*', { count: 'exact', head: true })
+        .in('form_id', forms.map(f => f.id));
+      
+      return count || 0;
+    },
+    enabled: !!organization?.id,
+  });
 
   const stats = [
     { 
       title: 'Formulaires', 
-      value: '12', 
+      value: formsData?.count?.toString() || '0', 
       change: '+2', 
       trend: 'up',
       icon: FileText,
@@ -64,7 +98,7 @@ export default function Dashboard() {
     },
     { 
       title: 'Réponses', 
-      value: '2,847', 
+      value: responsesCount?.toString() || '0', 
       change: '+18%', 
       trend: 'up',
       icon: BarChart3,
@@ -72,21 +106,23 @@ export default function Dashboard() {
     },
     { 
       title: 'Utilisateurs', 
-      value: '48', 
-      change: '+5', 
+      value: '1', 
+      change: '+0', 
       trend: 'up',
       icon: Users,
       color: 'info'
     },
     { 
       title: 'Taux présence', 
-      value: '94%', 
-      change: '-2%', 
-      trend: 'down',
+      value: '—', 
+      change: '—', 
+      trend: 'up',
       icon: Clock,
       color: 'warning'
     },
   ];
+
+  const displayName = profile?.full_name?.split(' ')[0] || 'Utilisateur';
 
   return (
     <DashboardLayout>
@@ -95,7 +131,7 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">
-              Bonjour, {user?.name?.split(' ')[0] || 'Utilisateur'} 👋
+              Bonjour, {displayName} 👋
             </h1>
             <p className="text-muted-foreground mt-1">
               Voici un aperçu de votre activité cette semaine.
@@ -242,25 +278,40 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentForms.map((form) => (
-                  <div 
-                    key={form.id}
-                    className="flex items-center justify-between p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <FileText className="w-5 h-5 text-primary" />
+                {formsData?.forms && formsData.forms.length > 0 ? (
+                  formsData.forms.map((form: any) => (
+                    <div 
+                      key={form.id}
+                      className="flex items-center justify-between p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-medium">{form.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {form.is_published ? 'Publié' : 'Brouillon'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">{form.name}</p>
-                        <p className="text-sm text-muted-foreground">{form.responses} réponses</p>
+                      <div className="text-sm text-muted-foreground">
+                        {new Date(form.updated_at).toLocaleDateString('fr-FR')}
                       </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {form.lastUpdate}
-                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Aucun formulaire pour le moment</p>
+                    <Link to="/dashboard/forms/new">
+                      <Button variant="outline" className="mt-4">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Créer mon premier formulaire
+                      </Button>
+                    </Link>
                   </div>
-                ))}
+                )}
               </div>
             </CardContent>
           </Card>

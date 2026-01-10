@@ -1,18 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { FileSpreadsheet, ArrowLeft, Mail, Lock, User } from 'lucide-react';
-import { useAuthStore, loginWithDemo } from '@/stores/authStore';
+import { FileSpreadsheet, ArrowLeft, Mail, Lock, User, Loader2 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Auth() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { login } = useAuthStore();
+  const { isAuthenticated, isLoading: authLoading, signIn, signUp } = useAuth();
   
   const [mode, setMode] = useState<'login' | 'signup'>(
     searchParams.get('mode') === 'signup' ? 'signup' : 'login'
@@ -24,33 +24,81 @@ export default function Auth() {
     password: '',
   });
 
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !authLoading) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, authLoading, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      if (mode === 'signup') {
+        const { error } = await signUp(formData.email, formData.password, formData.name);
+        
+        if (error) {
+          if (error.message.includes('already registered')) {
+            toast({
+              title: 'Compte existant',
+              description: 'Un compte existe déjà avec cet email. Veuillez vous connecter.',
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Erreur',
+              description: error.message,
+              variant: 'destructive',
+            });
+          }
+          setIsLoading(false);
+          return;
+        }
 
-    // Demo login
-    loginWithDemo();
-    
-    toast({
-      title: mode === 'login' ? 'Connexion réussie !' : 'Compte créé !',
-      description: 'Bienvenue sur Formy.',
-    });
+        toast({
+          title: 'Compte créé !',
+          description: 'Bienvenue sur Formy. Vous êtes maintenant connecté.',
+        });
+        navigate('/dashboard');
+      } else {
+        const { error } = await signIn(formData.email, formData.password);
+        
+        if (error) {
+          toast({
+            title: 'Erreur de connexion',
+            description: 'Email ou mot de passe incorrect.',
+            variant: 'destructive',
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        toast({
+          title: 'Connexion réussie !',
+          description: 'Bienvenue sur Formy.',
+        });
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      toast({
+        title: 'Erreur',
+        description: 'Une erreur inattendue est survenue.',
+        variant: 'destructive',
+      });
+    }
 
     setIsLoading(false);
-    navigate('/dashboard');
   };
 
-  const handleDemoLogin = () => {
-    loginWithDemo();
-    toast({
-      title: 'Connexion démo',
-      description: 'Vous êtes connecté avec le compte de démonstration.',
-    });
-    navigate('/dashboard');
-  };
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -100,6 +148,7 @@ export default function Auth() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -117,6 +166,7 @@ export default function Auth() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
+                  disabled={isLoading}
                 />
               </div>
             </div>
@@ -133,33 +183,24 @@ export default function Auth() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   required
-                  minLength={8}
+                  minLength={6}
+                  disabled={isLoading}
                 />
               </div>
+              {mode === 'signup' && (
+                <p className="text-xs text-muted-foreground">Minimum 6 caractères</p>
+              )}
             </div>
 
             <Button type="submit" variant="hero" className="w-full" size="lg" disabled={isLoading}>
-              {isLoading ? 'Chargement...' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Chargement...
+                </>
+              ) : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
             </Button>
           </form>
-
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t"></div>
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Ou</span>
-            </div>
-          </div>
-
-          <Button 
-            variant="outline" 
-            className="w-full" 
-            size="lg"
-            onClick={handleDemoLogin}
-          >
-            Essayer avec un compte démo
-          </Button>
 
           <p className="text-center text-sm text-muted-foreground mt-6">
             {mode === 'login' ? (

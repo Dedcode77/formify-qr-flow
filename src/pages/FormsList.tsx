@@ -12,7 +12,8 @@ import {
   ExternalLink, 
   Copy, 
   Trash2,
-  Edit
+  Edit,
+  Loader2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -23,58 +24,77 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-
-// Mock data
-const mockForms = [
-  {
-    id: '1',
-    name: 'Formulaire de satisfaction',
-    slug: 'satisfaction-client',
-    responses: 127,
-    createdAt: '2024-01-15',
-    isPublished: true,
-  },
-  {
-    id: '2',
-    name: 'Inscription événement',
-    slug: 'inscription-evenement',
-    responses: 45,
-    createdAt: '2024-01-10',
-    isPublished: true,
-  },
-  {
-    id: '3',
-    name: 'Feedback produit',
-    slug: 'feedback-produit',
-    responses: 89,
-    createdAt: '2024-01-05',
-    isPublished: false,
-  },
-  {
-    id: '4',
-    name: 'Demande de contact',
-    slug: 'contact',
-    responses: 234,
-    createdAt: '2024-01-01',
-    isPublished: true,
-  },
-];
+import { useAuth } from '@/hooks/useAuth';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function FormsList() {
   const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
+  const { organization } = useAuth();
+  const queryClient = useQueryClient();
 
-  const filteredForms = mockForms.filter((form) =>
+  const { data: forms, isLoading } = useQuery({
+    queryKey: ['forms', organization?.id],
+    queryFn: async () => {
+      if (!organization?.id) return [];
+      const { data, error } = await supabase
+        .from('forms')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .order('updated_at', { ascending: false });
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organization?.id,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (formId: string) => {
+      const { error } = await supabase
+        .from('forms')
+        .delete()
+        .eq('id', formId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['forms'] });
+      toast({
+        title: 'Formulaire supprimé',
+        description: 'Le formulaire a été supprimé avec succès.',
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de supprimer le formulaire.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const filteredForms = forms?.filter((form) =>
     form.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ) || [];
 
   const handleCopyLink = (slug: string) => {
-    navigator.clipboard.writeText(`https://formy.app/f/${slug}`);
+    navigator.clipboard.writeText(`${window.location.origin}/f/${slug}`);
     toast({
       title: 'Lien copié',
       description: 'Le lien du formulaire a été copié dans le presse-papier.',
     });
   };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -124,7 +144,7 @@ export default function FormsList() {
                     <div>
                       <CardTitle className="text-base font-semibold">{form.name}</CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Créé le {new Date(form.createdAt).toLocaleDateString('fr-FR')}
+                        Créé le {new Date(form.created_at).toLocaleDateString('fr-FR')}
                       </p>
                     </div>
                   </div>
@@ -145,12 +165,17 @@ export default function FormsList() {
                         <Copy className="w-4 h-4 mr-2" />
                         Copier le lien
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Ouvrir
+                      <DropdownMenuItem asChild>
+                        <a href={`/f/${form.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center">
+                          <ExternalLink className="w-4 h-4 mr-2" />
+                          Ouvrir
+                        </a>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive focus:text-destructive">
+                      <DropdownMenuItem 
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => deleteMutation.mutate(form.id)}
+                      >
                         <Trash2 className="w-4 h-4 mr-2" />
                         Supprimer
                       </DropdownMenuItem>
@@ -161,16 +186,18 @@ export default function FormsList() {
                   <div className="flex items-center justify-between mt-4">
                     <div className="flex items-center gap-4">
                       <div>
-                        <p className="text-2xl font-bold">{form.responses}</p>
-                        <p className="text-xs text-muted-foreground">réponses</p>
+                        <p className="text-2xl font-bold">
+                          {Array.isArray(form.fields) ? form.fields.length : 0}
+                        </p>
+                        <p className="text-xs text-muted-foreground">champs</p>
                       </div>
                     </div>
                     <span className={`px-2 py-1 text-xs rounded-full ${
-                      form.isPublished 
+                      form.is_published 
                         ? 'bg-success/10 text-success' 
                         : 'bg-muted text-muted-foreground'
                     }`}>
-                      {form.isPublished ? 'Publié' : 'Brouillon'}
+                      {form.is_published ? 'Publié' : 'Brouillon'}
                     </span>
                   </div>
                 </CardContent>
