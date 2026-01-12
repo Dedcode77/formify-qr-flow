@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -18,10 +18,24 @@ import {
   Loader2, 
   FileSpreadsheet,
   Calendar,
-  User
+  TrendingUp,
+  BarChart3
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  BarChart,
+  Bar
+} from 'recharts';
+import { format, subDays, startOfDay, eachDayOfInterval } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
 interface FormField {
   id: string;
@@ -40,7 +54,7 @@ export default function FormResponses() {
         .from('forms')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
       
       if (error) throw error;
       return data;
@@ -66,6 +80,47 @@ export default function FormResponses() {
   const fields: FormField[] = form?.fields 
     ? (Array.isArray(form.fields) ? (form.fields as unknown as FormField[]) : [])
     : [];
+
+  // Calculate daily responses for the chart
+  const chartData = useMemo(() => {
+    if (!responses) return [];
+    
+    const last14Days = eachDayOfInterval({
+      start: subDays(new Date(), 13),
+      end: new Date()
+    });
+
+    return last14Days.map(day => {
+      const dayStart = startOfDay(day);
+      const count = responses.filter(r => {
+        const responseDate = startOfDay(new Date(r.submitted_at));
+        return responseDate.getTime() === dayStart.getTime();
+      }).length;
+
+      return {
+        date: format(day, 'dd MMM', { locale: fr }),
+        responses: count
+      };
+    });
+  }, [responses]);
+
+  // Calculate completion stats per field
+  const fieldStats = useMemo(() => {
+    if (!responses || !fields.length) return [];
+    
+    return fields.slice(0, 5).map(field => {
+      const filledCount = responses.filter(r => {
+        const data = r.data as Record<string, unknown>;
+        const value = data[field.id];
+        return value !== undefined && value !== null && value !== '';
+      }).length;
+
+      return {
+        name: field.label.length > 15 ? field.label.slice(0, 15) + '...' : field.label,
+        taux: responses.length > 0 ? Math.round((filledCount / responses.length) * 100) : 0
+      };
+    });
+  }, [responses, fields]);
 
   const exportToCSV = () => {
     if (!responses || !fields.length) return;
@@ -104,6 +159,26 @@ export default function FormResponses() {
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!form) {
+    return (
+      <DashboardLayout>
+        <div className="text-center py-12">
+          <FileSpreadsheet className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+          <h3 className="font-semibold mb-2">Formulaire introuvable</h3>
+          <p className="text-muted-foreground mb-4">
+            Ce formulaire n'existe pas ou a été supprimé.
+          </p>
+          <Link to="/dashboard/forms">
+            <Button variant="outline">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Retour aux formulaires
+            </Button>
+          </Link>
         </div>
       </DashboardLayout>
     );
@@ -190,18 +265,135 @@ export default function FormResponses() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Champs du formulaire
+                  Moyenne / jour (14j)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-2">
-                  <User className="w-5 h-5 text-primary" />
-                  <span className="text-2xl font-bold">{fields.length}</span>
+                  <TrendingUp className="w-5 h-5 text-primary" />
+                  <span className="text-2xl font-bold">
+                    {chartData.length > 0 
+                      ? (chartData.reduce((acc, d) => acc + d.responses, 0) / chartData.length).toFixed(1)
+                      : '0'}
+                  </span>
                 </div>
               </CardContent>
             </Card>
           </motion.div>
         </div>
+
+        {/* Charts */}
+        {responses && responses.length > 0 && (
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Daily responses chart */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-primary" />
+                    Réponses par jour (14 derniers jours)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id="colorResponses" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="date" 
+                          tick={{ fontSize: 12 }}
+                          className="text-muted-foreground"
+                        />
+                        <YAxis 
+                          tick={{ fontSize: 12 }}
+                          className="text-muted-foreground"
+                          allowDecimals={false}
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px'
+                          }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="responses"
+                          name="Réponses"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={2}
+                          fillOpacity={1}
+                          fill="url(#colorResponses)"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Field completion chart */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-primary" />
+                    Taux de complétion par champ
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={fieldStats} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          type="number" 
+                          domain={[0, 100]}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => `${value}%`}
+                        />
+                        <YAxis 
+                          dataKey="name" 
+                          type="category" 
+                          width={80}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px'
+                          }}
+                          formatter={(value) => [`${value}%`, 'Taux']}
+                        />
+                        <Bar 
+                          dataKey="taux" 
+                          fill="hsl(var(--primary))" 
+                          radius={[0, 4, 4, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        )}
 
         {/* Responses Table */}
         <Card>

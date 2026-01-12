@@ -16,9 +16,11 @@ import {
   Edit,
   Loader2,
   BarChart3,
-  Link2
+  Link2,
+  QrCode,
+  Files
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,16 +28,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function FormsList() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [selectedForm, setSelectedForm] = useState<{ name: string; slug: string } | null>(null);
   const { toast } = useToast();
-  const { organization } = useAuth();
+  const { organization, user } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const { data: forms, isLoading } = useQuery({
     queryKey: ['forms', organization?.id],
@@ -103,6 +115,45 @@ export default function FormsList() {
     },
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: async (form: typeof forms extends (infer T)[] | undefined ? T : never) => {
+      if (!organization?.id || !user?.id) throw new Error('Missing org or user');
+      
+      const newSlug = `${form.slug}-copy-${Date.now().toString(36)}`;
+      const { data, error } = await supabase
+        .from('forms')
+        .insert({
+          name: `${form.name} (copie)`,
+          description: form.description,
+          slug: newSlug,
+          fields: form.fields,
+          is_published: false,
+          organization_id: organization.id,
+          created_by: user.id,
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['forms'] });
+      toast({
+        title: 'Formulaire dupliqué',
+        description: 'Le formulaire a été dupliqué avec succès.',
+      });
+      navigate(`/dashboard/forms/${data.id}`);
+    },
+    onError: () => {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de dupliquer le formulaire.',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const filteredForms = forms?.filter((form) =>
     form.name.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
@@ -113,6 +164,35 @@ export default function FormsList() {
       title: 'Lien copié',
       description: 'Le lien du formulaire a été copié dans le presse-papier.',
     });
+  };
+
+  const handleShowQR = (name: string, slug: string) => {
+    setSelectedForm({ name, slug });
+    setQrDialogOpen(true);
+  };
+
+  const downloadQRCode = () => {
+    if (!selectedForm) return;
+    const svg = document.getElementById('qr-code-svg');
+    if (!svg) return;
+    
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      canvas.width = 300;
+      canvas.height = 300;
+      ctx?.drawImage(img, 0, 0);
+      const pngFile = canvas.toDataURL('image/png');
+      const downloadLink = document.createElement('a');
+      downloadLink.download = `qr-${selectedForm.slug}.png`;
+      downloadLink.href = pngFile;
+      downloadLink.click();
+    };
+    
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   };
 
   if (isLoading) {
@@ -196,10 +276,21 @@ export default function FormsList() {
                           Voir les réponses
                         </Link>
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => duplicateMutation.mutate(form)}>
+                        <Files className="w-4 h-4 mr-2" />
+                        Dupliquer
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => handleCopyLink(form.slug)}>
                         <Copy className="w-4 h-4 mr-2" />
                         Copier le lien
                       </DropdownMenuItem>
+                      {form.is_published && (
+                        <DropdownMenuItem onClick={() => handleShowQR(form.name, form.slug)}>
+                          <QrCode className="w-4 h-4 mr-2" />
+                          Afficher QR Code
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem asChild>
                         <a href={`/f/${form.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center">
                           <ExternalLink className="w-4 h-4 mr-2" />
@@ -218,17 +309,26 @@ export default function FormsList() {
                   </DropdownMenu>
                 </CardHeader>
                 <CardContent>
-                  {/* Copy Link Button */}
+                  {/* QR Code & Copy Link Buttons */}
                   {form.is_published && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="w-full mb-3"
-                      onClick={() => handleCopyLink(form.slug)}
-                    >
-                      <Link2 className="w-4 h-4 mr-2" />
-                      Copier le lien public
-                    </Button>
+                    <div className="flex gap-2 mb-3">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => handleCopyLink(form.slug)}
+                      >
+                        <Link2 className="w-4 h-4 mr-2" />
+                        Copier le lien
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleShowQR(form.name, form.slug)}
+                      >
+                        <QrCode className="w-4 h-4" />
+                      </Button>
+                    </div>
                   )}
 
                   <div className="flex items-center justify-between mt-2">
@@ -286,6 +386,46 @@ export default function FormsList() {
           )}
         </div>
       </div>
+
+      {/* QR Code Dialog */}
+      <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>QR Code - {selectedForm?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            <div className="bg-white p-4 rounded-lg">
+              <QRCodeSVG
+                id="qr-code-svg"
+                value={`${window.location.origin}/f/${selectedForm?.slug}`}
+                size={200}
+                level="H"
+                includeMargin
+              />
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              Scannez ce code pour accéder au formulaire
+            </p>
+            <div className="flex gap-2 w-full">
+              <Button 
+                variant="outline" 
+                className="flex-1"
+                onClick={() => handleCopyLink(selectedForm?.slug || '')}
+              >
+                <Copy className="w-4 h-4 mr-2" />
+                Copier le lien
+              </Button>
+              <Button 
+                variant="hero" 
+                className="flex-1"
+                onClick={downloadQRCode}
+              >
+                Télécharger
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
