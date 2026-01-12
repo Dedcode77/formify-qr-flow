@@ -4,6 +4,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { 
   Plus, 
   Search, 
@@ -13,7 +14,9 @@ import {
   Copy, 
   Trash2,
   Edit,
-  Loader2
+  Loader2,
+  BarChart3,
+  Link2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -69,6 +72,32 @@ export default function FormsList() {
       toast({
         title: 'Erreur',
         description: 'Impossible de supprimer le formulaire.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const togglePublishMutation = useMutation({
+    mutationFn: async ({ formId, isPublished }: { formId: string; isPublished: boolean }) => {
+      const { error } = await supabase
+        .from('forms')
+        .update({ is_published: isPublished })
+        .eq('id', formId);
+      if (error) throw error;
+    },
+    onSuccess: (_, { isPublished }) => {
+      queryClient.invalidateQueries({ queryKey: ['forms'] });
+      toast({
+        title: isPublished ? 'Formulaire publié' : 'Formulaire dépublié',
+        description: isPublished 
+          ? 'Le formulaire est maintenant accessible au public.'
+          : 'Le formulaire n\'est plus accessible au public.',
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de modifier le statut de publication.',
         variant: 'destructive',
       });
     },
@@ -154,11 +183,17 @@ export default function FormsList() {
                         <MoreVertical className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent align="end" className="bg-popover">
                       <DropdownMenuItem asChild>
                         <Link to={`/dashboard/forms/${form.id}`} className="flex items-center">
                           <Edit className="w-4 h-4 mr-2" />
                           Modifier
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to={`/dashboard/forms/${form.id}/responses`} className="flex items-center">
+                          <BarChart3 className="w-4 h-4 mr-2" />
+                          Voir les réponses
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleCopyLink(form.slug)}>
@@ -183,7 +218,20 @@ export default function FormsList() {
                   </DropdownMenu>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center justify-between mt-4">
+                  {/* Copy Link Button */}
+                  {form.is_published && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full mb-3"
+                      onClick={() => handleCopyLink(form.slug)}
+                    >
+                      <Link2 className="w-4 h-4 mr-2" />
+                      Copier le lien public
+                    </Button>
+                  )}
+
+                  <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center gap-4">
                       <div>
                         <p className="text-2xl font-bold">
@@ -192,13 +240,24 @@ export default function FormsList() {
                         <p className="text-xs text-muted-foreground">champs</p>
                       </div>
                     </div>
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      form.is_published 
-                        ? 'bg-success/10 text-success' 
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {form.is_published ? 'Publié' : 'Brouillon'}
-                    </span>
+                    
+                    {/* Publication Toggle */}
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={form.is_published}
+                        onCheckedChange={(checked) => 
+                          togglePublishMutation.mutate({ formId: form.id, isPublished: checked })
+                        }
+                        disabled={togglePublishMutation.isPending}
+                      />
+                      <span className={`text-xs font-medium ${
+                        form.is_published 
+                          ? 'text-success' 
+                          : 'text-muted-foreground'
+                      }`}>
+                        {form.is_published ? 'Publié' : 'Brouillon'}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
