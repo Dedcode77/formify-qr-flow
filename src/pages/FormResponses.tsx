@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { 
   Table, 
   TableBody, 
@@ -12,6 +13,13 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { 
   ArrowLeft, 
   Download, 
@@ -19,7 +27,11 @@ import {
   FileSpreadsheet,
   Calendar,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  Filter,
+  ArrowUpDown,
+  Search,
+  X
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -34,7 +46,7 @@ import {
   BarChart,
   Bar
 } from 'recharts';
-import { format, subDays, startOfDay, eachDayOfInterval } from 'date-fns';
+import { format, subDays, startOfDay, eachDayOfInterval, isAfter, isBefore, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 interface FormField {
@@ -44,8 +56,20 @@ interface FormField {
   required?: boolean;
 }
 
+type SortDirection = 'asc' | 'desc';
+type SortField = 'date' | string;
+
 export default function FormResponses() {
   const { id } = useParams();
+  
+  // Filter and sort state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [filterField, setFilterField] = useState<string>('');
+  const [filterValue, setFilterValue] = useState('');
   
   const { data: form, isLoading: formLoading } = useQuery({
     queryKey: ['form', id],
@@ -80,6 +104,88 @@ export default function FormResponses() {
   const fields: FormField[] = form?.fields 
     ? (Array.isArray(form.fields) ? (form.fields as unknown as FormField[]) : [])
     : [];
+
+  // Filter and sort responses
+  const filteredResponses = useMemo(() => {
+    if (!responses) return [];
+    
+    let filtered = [...responses];
+    
+    // Date range filter
+    if (dateFrom) {
+      const fromDate = parseISO(dateFrom);
+      filtered = filtered.filter(r => isAfter(new Date(r.submitted_at), fromDate) || 
+        startOfDay(new Date(r.submitted_at)).getTime() === startOfDay(fromDate).getTime());
+    }
+    if (dateTo) {
+      const toDate = parseISO(dateTo);
+      filtered = filtered.filter(r => isBefore(new Date(r.submitted_at), toDate) ||
+        startOfDay(new Date(r.submitted_at)).getTime() === startOfDay(toDate).getTime());
+    }
+    
+    // Search term filter (searches all text fields)
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(r => {
+        const data = r.data as Record<string, unknown>;
+        return Object.values(data).some(v => 
+          String(v).toLowerCase().includes(search)
+        );
+      });
+    }
+    
+    // Specific field filter
+    if (filterField && filterValue) {
+      filtered = filtered.filter(r => {
+        const data = r.data as Record<string, unknown>;
+        const value = data[filterField];
+        if (Array.isArray(value)) {
+          return value.some(v => String(v).toLowerCase().includes(filterValue.toLowerCase()));
+        }
+        return String(value || '').toLowerCase().includes(filterValue.toLowerCase());
+      });
+    }
+    
+    // Sorting
+    filtered.sort((a, b) => {
+      if (sortField === 'date') {
+        const dateA = new Date(a.submitted_at).getTime();
+        const dateB = new Date(b.submitted_at).getTime();
+        return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
+      } else {
+        const dataA = a.data as Record<string, unknown>;
+        const dataB = b.data as Record<string, unknown>;
+        const valueA = String(dataA[sortField] || '');
+        const valueB = String(dataB[sortField] || '');
+        return sortDirection === 'asc' 
+          ? valueA.localeCompare(valueB) 
+          : valueB.localeCompare(valueA);
+      }
+    });
+    
+    return filtered;
+  }, [responses, dateFrom, dateTo, searchTerm, filterField, filterValue, sortField, sortDirection]);
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setDateFrom('');
+    setDateTo('');
+    setFilterField('');
+    setFilterValue('');
+    setSortField('date');
+    setSortDirection('desc');
+  };
+
+  const hasActiveFilters = searchTerm || dateFrom || dateTo || filterField || filterValue;
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
 
   // Calculate daily responses for the chart
   const chartData = useMemo(() => {
@@ -395,31 +501,131 @@ export default function FormResponses() {
           </div>
         )}
 
+        {/* Filters */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Filter className="w-5 h-5 text-primary" />
+              Filtres et tri
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
+              {/* Date from */}
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Du</label>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                />
+              </div>
+
+              {/* Date to */}
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Au</label>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                />
+              </div>
+
+              {/* Filter by field */}
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Filtrer par champ</label>
+                <Select value={filterField} onValueChange={setFilterField}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir un champ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fields.map(field => (
+                      <SelectItem key={field.id} value={field.id}>
+                        {field.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Filter value (shown when field selected) */}
+            {filterField && (
+              <div className="mt-4">
+                <Input
+                  placeholder={`Valeur pour "${fields.find(f => f.id === filterField)?.label}"...`}
+                  value={filterValue}
+                  onChange={(e) => setFilterValue(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* Active filters summary */}
+            {hasActiveFilters && (
+              <div className="mt-4 flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  {filteredResponses.length} résultat{filteredResponses.length > 1 ? 's' : ''}
+                </span>
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  <X className="w-4 h-4 mr-1" />
+                  Effacer les filtres
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Responses Table */}
         <Card>
           <CardContent className="p-0">
-            {responses && responses.length > 0 ? (
+            {filteredResponses && filteredResponses.length > 0 ? (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[150px]">Date</TableHead>
+                      <TableHead 
+                        className="min-w-[150px] cursor-pointer hover:bg-muted/50"
+                        onClick={() => handleSort('date')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Date
+                          <ArrowUpDown className={`w-4 h-4 ${sortField === 'date' ? 'text-primary' : 'text-muted-foreground'}`} />
+                        </div>
+                      </TableHead>
                       {fields.map(field => (
-                        <TableHead key={field.id} className="min-w-[150px]">
-                          {field.label}
+                        <TableHead 
+                          key={field.id} 
+                          className="min-w-[150px] cursor-pointer hover:bg-muted/50"
+                          onClick={() => handleSort(field.id)}
+                        >
+                          <div className="flex items-center gap-1">
+                            {field.label}
+                            <ArrowUpDown className={`w-4 h-4 ${sortField === field.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </div>
                         </TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {responses.map((response, index) => {
+                    {filteredResponses.map((response, index) => {
                       const data = response.data as Record<string, unknown>;
                       return (
                         <motion.tr
                           key={response.id}
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
-                          transition={{ delay: index * 0.05 }}
+                          transition={{ delay: Math.min(index * 0.02, 0.5) }}
                           className="border-b transition-colors hover:bg-muted/50"
                         >
                           <TableCell className="font-medium">
@@ -464,9 +670,13 @@ export default function FormResponses() {
             ) : (
               <div className="text-center py-12">
                 <FileSpreadsheet className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="font-semibold mb-2">Aucune réponse</h3>
+                <h3 className="font-semibold mb-2">
+                  {hasActiveFilters ? 'Aucun résultat' : 'Aucune réponse'}
+                </h3>
                 <p className="text-muted-foreground">
-                  Les réponses à ce formulaire apparaîtront ici.
+                  {hasActiveFilters 
+                    ? 'Essayez de modifier vos filtres.'
+                    : 'Les réponses à ce formulaire apparaîtront ici.'}
                 </p>
               </div>
             )}
