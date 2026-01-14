@@ -177,22 +177,66 @@ export default function PublicForm() {
 
     setSubmitting(true);
 
-    const { error } = await supabase
-      .from('form_responses')
-      .insert([{
-        form_id: form.id,
-        data: formValues as unknown as Json
-      }]);
+    try {
+      // Insert response
+      const { error } = await supabase
+        .from('form_responses')
+        .insert([{
+          form_id: form.id,
+          data: formValues as unknown as Json
+        }]);
 
-    if (error) {
+      if (error) throw error;
+
+      // Fetch owner email and send notification
+      const { data: formData } = await supabase
+        .from('forms')
+        .select('organization_id, name')
+        .eq('id', form.id)
+        .single();
+
+      if (formData?.organization_id) {
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('owner_id')
+          .eq('id', formData.organization_id)
+          .single();
+
+        if (orgData?.owner_id) {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('email')
+            .eq('id', orgData.owner_id)
+            .single();
+
+          if (profileData?.email) {
+            // Build response data with field labels
+            const responseWithLabels: Record<string, unknown> = {};
+            form.fields.forEach(field => {
+              responseWithLabels[field.label] = formValues[field.id];
+            });
+
+            // Send email notification
+            await supabase.functions.invoke('send-form-notification', {
+              body: {
+                formId: form.id,
+                formName: form.name,
+                responseData: responseWithLabels,
+                ownerEmail: profileData.email
+              }
+            });
+          }
+        }
+      }
+
+      setSubmitted(true);
+    } catch (error: any) {
       console.error('Error submitting form:', error);
       toast({
         title: "Erreur",
         description: "Impossible d'envoyer le formulaire",
         variant: "destructive"
       });
-    } else {
-      setSubmitted(true);
     }
 
     setSubmitting(false);
