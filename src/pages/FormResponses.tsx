@@ -31,7 +31,8 @@ import {
   Filter,
   ArrowUpDown,
   Search,
-  X
+  X,
+  FileDown
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -48,6 +49,8 @@ import {
 } from 'recharts';
 import { format, subDays, startOfDay, eachDayOfInterval, isAfter, isBefore, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface FormField {
   id: string;
@@ -229,11 +232,11 @@ export default function FormResponses() {
   }, [responses, fields]);
 
   const exportToCSV = () => {
-    if (!responses || !fields.length) return;
+    if (!filteredResponses || !fields.length) return;
 
     const headers = ['Date de soumission', ...fields.map(f => f.label)];
     
-    const rows = responses.map(response => {
+    const rows = filteredResponses.map(response => {
       const data = response.data as Record<string, unknown>;
       return [
         new Date(response.submitted_at).toLocaleString('fr-FR'),
@@ -241,6 +244,7 @@ export default function FormResponses() {
           const value = data[f.id];
           if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
           if (Array.isArray(value)) return value.join(', ');
+          if (f.type === 'signature') return '[Signature]';
           return String(value || '');
         })
       ];
@@ -258,6 +262,80 @@ export default function FormResponses() {
     link.click();
   };
 
+  const exportToPDF = () => {
+    if (!filteredResponses || !fields.length || !form) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(99, 102, 241); // Primary color
+    doc.text(form.name, 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(107, 114, 128); // Muted color
+    doc.text(`Exporté le ${new Date().toLocaleDateString('fr-FR')} • ${filteredResponses.length} réponse(s)`, 14, 28);
+    
+    // Separator line
+    doc.setDrawColor(229, 231, 235);
+    doc.line(14, 32, pageWidth - 14, 32);
+
+    // Prepare table data
+    const tableHeaders = ['Date', ...fields.map(f => f.label)];
+    const tableData = filteredResponses.map(response => {
+      const data = response.data as Record<string, unknown>;
+      return [
+        new Date(response.submitted_at).toLocaleDateString('fr-FR'),
+        ...fields.map(f => {
+          const value = data[f.id];
+          if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
+          if (Array.isArray(value)) return value.join(', ');
+          if (f.type === 'signature') return '[Signature]';
+          return String(value || '-');
+        })
+      ];
+    });
+
+    // Generate table
+    autoTable(doc, {
+      head: [tableHeaders],
+      body: tableData,
+      startY: 38,
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+      },
+      headStyles: {
+        fillColor: [99, 102, 241],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [249, 250, 251],
+      },
+      columnStyles: {
+        0: { cellWidth: 25 },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Footer
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(156, 163, 175);
+      doc.text(
+        `Page ${i} sur ${pageCount} • Généré par FormFlow`,
+        pageWidth / 2,
+        doc.internal.pageSize.getHeight() - 10,
+        { align: 'center' }
+      );
+    }
+
+    doc.save(`${form.name}_reponses_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
   const isLoading = formLoading || responsesLoading;
 
   if (isLoading) {
@@ -308,14 +386,24 @@ export default function FormResponses() {
               </p>
             </div>
           </div>
-          <Button 
-            variant="hero" 
-            onClick={exportToCSV}
-            disabled={!responses?.length}
-          >
-            <Download className="w-4 h-4" />
-            Exporter CSV
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={exportToPDF}
+              disabled={!filteredResponses?.length}
+            >
+              <FileDown className="w-4 h-4" />
+              PDF
+            </Button>
+            <Button 
+              variant="hero" 
+              onClick={exportToCSV}
+              disabled={!filteredResponses?.length}
+            >
+              <Download className="w-4 h-4" />
+              CSV
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}

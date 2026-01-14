@@ -92,6 +92,9 @@ export type Database = {
       }
       forms: {
         Row: {
+          confirmation_email_body: string | null
+          confirmation_email_enabled: boolean
+          confirmation_email_subject: string | null
           created_at: string
           created_by: string
           description: string | null
@@ -102,8 +105,12 @@ export type Database = {
           organization_id: string
           slug: string
           updated_at: string
+          webhook_url: string | null
         }
         Insert: {
+          confirmation_email_body?: string | null
+          confirmation_email_enabled?: boolean
+          confirmation_email_subject?: string | null
           created_at?: string
           created_by: string
           description?: string | null
@@ -114,8 +121,12 @@ export type Database = {
           organization_id: string
           slug: string
           updated_at?: string
+          webhook_url?: string | null
         }
         Update: {
+          confirmation_email_body?: string | null
+          confirmation_email_enabled?: boolean
+          confirmation_email_subject?: string | null
           created_at?: string
           created_by?: string
           description?: string | null
@@ -126,6 +137,7 @@ export type Database = {
           organization_id?: string
           slug?: string
           updated_at?: string
+          webhook_url?: string | null
         }
         Relationships: [
           {

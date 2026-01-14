@@ -20,6 +20,10 @@ interface FormData {
   description: string | null;
   fields: FormField[];
   is_published: boolean;
+  webhook_url?: string | null;
+  confirmation_email_enabled?: boolean;
+  confirmation_email_subject?: string | null;
+  confirmation_email_body?: string | null;
 }
 
 export default function PublicForm() {
@@ -43,7 +47,7 @@ export default function PublicForm() {
 
     const { data, error } = await supabase
       .from('forms')
-      .select('id, name, description, fields, is_published')
+      .select('id, name, description, fields, is_published, webhook_url, confirmation_email_enabled, confirmation_email_subject, confirmation_email_body')
       .eq('slug', slug)
       .eq('is_published', true)
       .maybeSingle();
@@ -188,10 +192,58 @@ export default function PublicForm() {
 
       if (error) throw error;
 
-      // Fetch owner email and send notification
+      // Build response data with field labels
+      const responseWithLabels: Record<string, unknown> = {};
+      form.fields.forEach(field => {
+        responseWithLabels[field.label] = formValues[field.id];
+      });
+
+      // Send webhook notification if configured
+      if (form.webhook_url) {
+        try {
+          await fetch(form.webhook_url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            mode: "no-cors",
+            body: JSON.stringify({
+              form_id: form.id,
+              form_name: form.name,
+              submitted_at: new Date().toISOString(),
+              data: responseWithLabels,
+            }),
+          });
+          console.log("Webhook sent successfully");
+        } catch (webhookError) {
+          console.error("Webhook error:", webhookError);
+        }
+      }
+
+      // Send confirmation email to respondent if enabled
+      if (form.confirmation_email_enabled) {
+        const emailField = form.fields.find(f => f.type === 'email');
+        if (emailField && formValues[emailField.id]) {
+          try {
+            await supabase.functions.invoke('send-confirmation-email', {
+              body: {
+                toEmail: formValues[emailField.id],
+                formName: form.name,
+                subject: form.confirmation_email_subject || 'Merci pour votre réponse',
+                body: form.confirmation_email_body || 'Nous avons bien reçu votre réponse.'
+              }
+            });
+            console.log("Confirmation email sent");
+          } catch (emailError) {
+            console.error("Confirmation email error:", emailError);
+          }
+        }
+      }
+
+      // Send owner notification email
       const { data: formData } = await supabase
         .from('forms')
-        .select('organization_id, name')
+        .select('organization_id')
         .eq('id', form.id)
         .single();
 
@@ -210,13 +262,6 @@ export default function PublicForm() {
             .single();
 
           if (profileData?.email) {
-            // Build response data with field labels
-            const responseWithLabels: Record<string, unknown> = {};
-            form.fields.forEach(field => {
-              responseWithLabels[field.label] = formValues[field.id];
-            });
-
-            // Send email notification
             await supabase.functions.invoke('send-form-notification', {
               body: {
                 formId: form.id,

@@ -18,7 +18,8 @@ import {
   BarChart3,
   Link2,
   QrCode,
-  Files
+  Files,
+  Settings
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -39,11 +40,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { QRCodeSVG } from 'qrcode.react';
+import { FormSettingsDialog } from '@/components/forms/FormSettingsDialog';
 
 export default function FormsList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [selectedForm, setSelectedForm] = useState<{ name: string; slug: string } | null>(null);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [selectedForm, setSelectedForm] = useState<{ id: string; name: string; slug: string; webhook_url?: string | null; confirmation_email_enabled?: boolean; confirmation_email_subject?: string | null; confirmation_email_body?: string | null } | null>(null);
   const { toast } = useToast();
   const { organization, user } = useAuth();
   const queryClient = useQueryClient();
@@ -166,9 +169,14 @@ export default function FormsList() {
     });
   };
 
-  const handleShowQR = (name: string, slug: string) => {
-    setSelectedForm({ name, slug });
+  const handleShowQR = (form: typeof forms extends (infer T)[] | undefined ? T : never) => {
+    setSelectedForm(form);
     setQrDialogOpen(true);
+  };
+
+  const handleShowSettings = (form: typeof forms extends (infer T)[] | undefined ? T : never) => {
+    setSelectedForm(form);
+    setSettingsDialogOpen(true);
   };
 
   const downloadQRCode = () => {
@@ -286,11 +294,15 @@ export default function FormsList() {
                         Copier le lien
                       </DropdownMenuItem>
                       {form.is_published && (
-                        <DropdownMenuItem onClick={() => handleShowQR(form.name, form.slug)}>
+                        <DropdownMenuItem onClick={() => handleShowQR(form)}>
                           <QrCode className="w-4 h-4 mr-2" />
                           Afficher QR Code
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuItem onClick={() => handleShowSettings(form)}>
+                        <Settings className="w-4 h-4 mr-2" />
+                        Paramètres
+                      </DropdownMenuItem>
                       <DropdownMenuItem asChild>
                         <a href={`/f/${form.slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center">
                           <ExternalLink className="w-4 h-4 mr-2" />
@@ -324,13 +336,33 @@ export default function FormsList() {
                       <Button 
                         variant="outline" 
                         size="sm"
-                        onClick={() => handleShowQR(form.name, form.slug)}
+                        onClick={() => handleShowQR(form)}
                       >
                         <QrCode className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleShowSettings(form)}
+                      >
+                        <Settings className="w-4 h-4" />
                       </Button>
                     </div>
                   )}
 
+                  {/* Settings button for unpublished forms */}
+                  {!form.is_published && (
+                    <div className="mb-3">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleShowSettings(form)}
+                      >
+                        <Settings className="w-4 h-4 mr-2" />
+                        Paramètres
+                      </Button>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center gap-4">
                       <div>
@@ -426,6 +458,15 @@ export default function FormsList() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Settings Dialog */}
+      {selectedForm && (
+        <FormSettingsDialog
+          open={settingsDialogOpen}
+          onOpenChange={setSettingsDialogOpen}
+          form={selectedForm}
+        />
+      )}
     </DashboardLayout>
   );
 }
