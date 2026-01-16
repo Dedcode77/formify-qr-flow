@@ -51,6 +51,7 @@ import { format, subDays, startOfDay, eachDayOfInterval, isAfter, isBefore, pars
 import { fr } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 interface FormField {
   id: string;
@@ -262,6 +263,40 @@ export default function FormResponses() {
     link.click();
   };
 
+  const exportToExcel = () => {
+    if (!filteredResponses || !fields.length || !form) return;
+
+    const headers = ['Date de soumission', ...fields.map(f => f.label)];
+    
+    const rows = filteredResponses.map(response => {
+      const data = response.data as Record<string, unknown>;
+      return [
+        new Date(response.submitted_at).toLocaleString('fr-FR'),
+        ...fields.map(f => {
+          const value = data[f.id];
+          if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
+          if (Array.isArray(value)) return value.join(', ');
+          if (f.type === 'signature') return '[Signature]';
+          return String(value || '');
+        })
+      ];
+    });
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const wsData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    
+    // Set column widths
+    const colWidths = headers.map((h, i) => ({
+      wch: Math.max(h.length, ...rows.map(r => String(r[i] || '').length).slice(0, 50)) + 2
+    }));
+    ws['!cols'] = colWidths;
+    
+    XLSX.utils.book_append_sheet(wb, ws, 'Réponses');
+    XLSX.writeFile(wb, `${form.name}_reponses_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const exportToPDF = () => {
     if (!filteredResponses || !fields.length || !form) return;
 
@@ -386,7 +421,7 @@ export default function FormResponses() {
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button 
               variant="outline" 
               onClick={exportToPDF}
@@ -394,6 +429,14 @@ export default function FormResponses() {
             >
               <FileDown className="w-4 h-4" />
               PDF
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={exportToExcel}
+              disabled={!filteredResponses?.length}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Excel
             </Button>
             <Button 
               variant="hero" 
