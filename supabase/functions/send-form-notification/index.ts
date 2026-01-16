@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +18,28 @@ interface NotificationRequest {
   ownerEmail: string;
 }
 
+// Simple in-memory rate limiting (resets on function cold start)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT = 10; // Max 10 emails per form per minute
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+
+const isRateLimited = (formId: string): boolean => {
+  const now = Date.now();
+  const entry = rateLimitMap.get(formId);
+  
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(formId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return false;
+  }
+  
+  if (entry.count >= RATE_LIMIT) {
+    return true;
+  }
+  
+  entry.count++;
+  return false;
+};
+
 const handler = async (req: Request): Promise<Response> => {
   console.log("Received request to send form notification");
 
@@ -25,6 +50,65 @@ const handler = async (req: Request): Promise<Response> => {
 
   try {
     const { formId, formName, responseData, ownerEmail }: NotificationRequest = await req.json();
+
+    // Input validation
+    if (!formId || typeof formId !== 'string' || formId.length > 100) {
+      console.error("Invalid formId provided");
+      return new Response(
+        JSON.stringify({ error: "Invalid form ID" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    if (!ownerEmail || typeof ownerEmail !== 'string' || !ownerEmail.includes('@') || ownerEmail.length > 255) {
+      console.error("Invalid email provided");
+      return new Response(
+        JSON.stringify({ error: "Invalid email address" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // Rate limiting check
+    if (isRateLimited(formId)) {
+      console.error(`Rate limit exceeded for form: ${formId}`);
+      return new Response(
+        JSON.stringify({ error: "Too many requests. Please try again later." }),
+        { status: 429, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // Server-side validation: Verify form exists and is published
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+    
+    const { data: form, error: formError } = await supabase
+      .from('forms')
+      .select('id, is_published, created_by')
+      .eq('id', formId)
+      .eq('is_published', true)
+      .single();
+
+    if (formError || !form) {
+      console.error("Form validation failed:", formError?.message || "Form not found or not published");
+      return new Response(
+        JSON.stringify({ error: "Invalid or unpublished form" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    // Verify the ownerEmail matches the form owner's profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('id', form.created_by)
+      .single();
+
+    if (profileError || !profile || profile.email !== ownerEmail) {
+      console.error("Owner email verification failed");
+      return new Response(
+        JSON.stringify({ error: "Owner email verification failed" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
 
     console.log(`Sending notification for form: ${formName} to ${ownerEmail}`);
 
