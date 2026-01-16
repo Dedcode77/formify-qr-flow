@@ -227,6 +227,7 @@ export default function PublicForm() {
           try {
             await supabase.functions.invoke('send-confirmation-email', {
               body: {
+                formId: form.id,
                 toEmail: formValues[emailField.id],
                 formName: form.name,
                 subject: form.confirmation_email_subject || 'Merci pour votre réponse',
