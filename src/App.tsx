@@ -12,6 +12,7 @@ import FormResponses from "./pages/FormResponses";
 import Analytics from "./pages/Analytics";
 import Attendance from "./pages/Attendance";
 import PublicForm from "./pages/PublicForm";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
           <Route path="/dashboard/forms/:id/responses" element={<FormResponses />} />
           <Route path="/dashboard/analytics" element={<Analytics />} />
           <Route path="/dashboard/attendance" element={<Attendance />} />
+          <Route path="/dashboard/settings" element={<Settings />} />
           <Route path="/f/:slug" element={<PublicForm />} />
           <Route path="/pricing" element={<Index />} />
           <Route path="*" element={<NotFound />} />
