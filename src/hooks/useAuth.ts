@@ -16,6 +16,7 @@ interface Organization {
   plan: string;
   forms_limit: number;
   responses_limit: number;
+  owner_id: string;
 }
 
 interface AuthState {
