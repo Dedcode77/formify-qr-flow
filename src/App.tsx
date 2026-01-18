@@ -13,6 +13,7 @@ import Analytics from "./pages/Analytics";
 import Attendance from "./pages/Attendance";
 import PublicForm from "./pages/PublicForm";
 import Settings from "./pages/Settings";
+import Team from "./pages/Team";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ const App = () => (
           <Route path="/dashboard/analytics" element={<Analytics />} />
           <Route path="/dashboard/attendance" element={<Attendance />} />
           <Route path="/dashboard/settings" element={<Settings />} />
+          <Route path="/dashboard/team" element={<Team />} />
           <Route path="/f/:slug" element={<PublicForm />} />
           <Route path="/pricing" element={<Index />} />
           <Route path="*" element={<NotFound />} />
