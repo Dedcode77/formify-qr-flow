@@ -1,17 +1,23 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   BarChart3, 
   TrendingUp, 
   TrendingDown,
   FileText,
-  Calendar,
+  Calendar as CalendarIcon,
   Target,
   Loader2,
-  ArrowUpRight
+  ArrowUpRight,
+  Download
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { 
@@ -31,13 +37,30 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { format, subDays, startOfDay, eachDayOfInterval, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
+import { format, subDays, startOfDay, eachDayOfInterval, startOfWeek, endOfWeek, subWeeks, isWithinInterval, parseISO, endOfDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { DateRange } from 'react-day-picker';
+import { cn } from '@/lib/utils';
 
 const COLORS = ['hsl(221, 83%, 53%)', 'hsl(160, 84%, 39%)', 'hsl(38, 92%, 50%)', 'hsl(280, 67%, 53%)', 'hsl(0, 84%, 60%)'];
 
+type PresetRange = '7d' | '30d' | '90d' | 'custom';
+
+const PRESET_RANGES: Record<PresetRange, { label: string; days: number }> = {
+  '7d': { label: '7 derniers jours', days: 7 },
+  '30d': { label: '30 derniers jours', days: 30 },
+  '90d': { label: '90 derniers jours', days: 90 },
+  'custom': { label: 'Personnalisé', days: 0 }
+};
+
 export default function Analytics() {
   const { organization } = useAuth();
+  const isMobile = useIsMobile();
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: subDays(new Date(), 29),
+    to: new Date()
+  });
+  const [presetRange, setPresetRange] = useState<PresetRange>('30d');
 
   // Fetch all forms with response counts
   const { data: formsData, isLoading: formsLoading } = useQuery({
@@ -70,19 +93,45 @@ export default function Analytics() {
     enabled: !!formsData?.length,
   });
 
-  // Calculate daily submissions for the last 30 days
-  const dailyTrendData = useMemo(() => {
-    if (!allResponses) return [];
+  // Filter responses based on date range
+  const filteredResponses = useMemo(() => {
+    if (!allResponses || !dateRange.from || !dateRange.to) return allResponses || [];
     
-    const last30Days = eachDayOfInterval({
-      start: subDays(new Date(), 29),
-      end: new Date()
+    return allResponses.filter(response => {
+      const responseDate = parseISO(response.submitted_at);
+      return isWithinInterval(responseDate, {
+        start: startOfDay(dateRange.from!),
+        end: endOfDay(dateRange.to!)
+      });
+    });
+  }, [allResponses, dateRange]);
+
+  // Handle preset range changes
+  const handlePresetChange = (value: string) => {
+    const preset = value as PresetRange;
+    setPresetRange(preset);
+    if (preset !== 'custom') {
+      const days = PRESET_RANGES[preset].days;
+      setDateRange({
+        from: subDays(new Date(), days - 1),
+        to: new Date()
+      });
+    }
+  };
+
+  // Calculate daily submissions for the selected period
+  const dailyTrendData = useMemo(() => {
+    if (!filteredResponses || !dateRange.from || !dateRange.to) return [];
+    
+    const days = eachDayOfInterval({
+      start: dateRange.from!,
+      end: dateRange.to!
     });
 
-    return last30Days.map(day => {
+    return days.map(day => {
       const dayStart = startOfDay(day);
-      const count = allResponses.filter(r => {
-        const responseDate = startOfDay(new Date(r.submitted_at));
+      const count = filteredResponses.filter(r => {
+        const responseDate = startOfDay(parseISO(r.submitted_at));
         return responseDate.getTime() === dayStart.getTime();
       }).length;
 
@@ -92,7 +141,7 @@ export default function Analytics() {
         responses: count
       };
     });
-  }, [allResponses]);
+  }, [filteredResponses, dateRange]);
 
   // Calculate weekly comparison
   const weeklyComparison = useMemo(() => {
@@ -157,7 +206,6 @@ export default function Analytics() {
   const responsesByDayOfWeek = useMemo(() => {
     if (!allResponses) return [];
     
-    const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
     const counts = [0, 0, 0, 0, 0, 0, 0];
     
     allResponses.forEach(r => {
@@ -182,8 +230,11 @@ export default function Analytics() {
   if (isLoading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+            <p className="text-muted-foreground">Chargement des analytiques...</p>
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -191,18 +242,73 @@ export default function Analytics() {
 
   const totalForms = formsData?.length || 0;
   const publishedForms = formsData?.filter(f => f.is_published).length || 0;
-  const totalResponses = allResponses?.length || 0;
+  const totalResponses = filteredResponses?.length || 0;
   const avgResponsesPerForm = totalForms > 0 ? Math.round(totalResponses / totalForms) : 0;
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Analytiques</h1>
-          <p className="text-muted-foreground mt-1">
-            Vue d'ensemble des performances de vos formulaires
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Analytiques</h1>
+            <p className="text-muted-foreground mt-1">
+              Vue d'ensemble des performances de vos formulaires
+            </p>
+          </div>
+          
+          {/* Date Range Selector */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={presetRange} onValueChange={handlePresetChange}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Période" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(PRESET_RANGES).map(([value, config]) => (
+                  <SelectItem key={value} value={value}>
+                    {config.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {presetRange === 'custom' && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="justify-start text-left font-normal">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateRange.from ? (
+                      dateRange.to ? (
+                        <>
+                          {format(dateRange.from, 'dd/MM/yyyy', { locale: fr })} -{' '}
+                          {format(dateRange.to, 'dd/MM/yyyy', { locale: fr })}
+                        </>
+                      ) : (
+                        format(dateRange.from, 'dd/MM/yyyy', { locale: fr })
+                      )
+                    ) : (
+                      <span>Période personnalisée</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRange.from}
+                    selected={dateRange}
+                    onSelect={(range) => range && setDateRange(range)}
+                    numberOfMonths={isMobile ? 1 : 2}
+                    className={cn("p-3 pointer-events-auto")}
+                  />
+                </PopoverContent>
+              </Popover>
+            )}
+            
+            <Button variant="outline" size="icon">
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Key Metrics */}
@@ -217,9 +323,10 @@ export default function Analytics() {
                   <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
                     <BarChart3 className="w-5 h-5 text-primary" />
                   </div>
-                  <div className={`flex items-center gap-1 text-sm ${
-                    weeklyComparison.change >= 0 ? 'text-success' : 'text-destructive'
-                  }`}>
+                  <div className={cn(
+                    "flex items-center gap-1 text-sm",
+                    weeklyComparison.change >= 0 ? 'text-green-600' : 'text-red-600'
+                  )}>
                     {weeklyComparison.change >= 0 ? (
                       <TrendingUp className="w-4 h-4" />
                     ) : (
@@ -229,7 +336,7 @@ export default function Analytics() {
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="text-2xl font-bold">{totalResponses}</p>
+                  <p className="text-2xl font-bold">{totalResponses.toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">Total réponses</p>
                 </div>
               </CardContent>
@@ -244,13 +351,13 @@ export default function Analytics() {
             <Card className="hover-lift">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-accent" />
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-blue-600" />
                   </div>
                   <Badge variant="secondary">{publishedForms} publiés</Badge>
                 </div>
                 <div className="mt-4">
-                  <p className="text-2xl font-bold">{totalForms}</p>
+                  <p className="text-2xl font-bold">{totalForms.toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">Formulaires</p>
                 </div>
               </CardContent>
@@ -265,12 +372,12 @@ export default function Analytics() {
             <Card className="hover-lift">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-info/10 flex items-center justify-center">
-                    <Target className="w-5 h-5 text-info" />
+                  <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/20 flex items-center justify-center">
+                    <Target className="w-5 h-5 text-green-600" />
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="text-2xl font-bold">{avgResponsesPerForm}</p>
+                  <p className="text-2xl font-bold">{avgResponsesPerForm.toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">Moy. réponses/form</p>
                 </div>
               </CardContent>
@@ -285,12 +392,12 @@ export default function Analytics() {
             <Card className="hover-lift">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
-                    <Calendar className="w-5 h-5 text-warning" />
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
+                    <CalendarIcon className="w-5 h-5 text-purple-600" />
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="text-2xl font-bold">{weeklyComparison.current}</p>
+                  <p className="text-2xl font-bold">{weeklyComparison.current.toLocaleString()}</p>
                   <p className="text-sm text-muted-foreground">Réponses cette semaine</p>
                 </div>
               </CardContent>
@@ -305,12 +412,15 @@ export default function Analytics() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
+            className="lg:col-span-2"
           >
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-primary" />
-                  Tendance des soumissions (30 jours)
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <TrendingUp className="w-4 h-4 text-primary" />
+                  </div>
+                  Tendance des soumissions
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -370,12 +480,14 @@ export default function Analytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-primary" />
-                  Réponses par jour de la semaine
+                  <div className="p-2 bg-green-100 dark:bg-green-900/20 rounded-lg">
+                    <BarChart3 className="w-4 h-4 text-green-600" />
+                  </div>
+                  Réponses par jour
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[300px]">
+                <div className="h-[250px]">
                   {responsesByDayOfWeek.some(d => d.responses > 0) ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={responsesByDayOfWeek}>
@@ -391,7 +503,7 @@ export default function Analytics() {
                         />
                         <Bar 
                           dataKey="responses" 
-                          fill="hsl(221, 83%, 53%)" 
+                          fill="hsl(160, 84%, 39%)" 
                           radius={[4, 4, 0, 0]}
                           name="Réponses"
                         />
@@ -406,11 +518,8 @@ export default function Analytics() {
               </CardContent>
             </Card>
           </motion.div>
-        </div>
 
-        {/* Bottom Row */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Popular Forms */}
+          {/* Distribution */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -419,67 +528,14 @@ export default function Analytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" />
-                  Formulaires populaires
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {popularForms.length > 0 ? (
-                  <div className="space-y-4">
-                    {popularForms.map((form, index) => (
-                      <Link 
-                        key={form.id}
-                        to={`/dashboard/forms/${form.id}/responses`}
-                        className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors group"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div 
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-                            style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                          >
-                            {index + 1}
-                          </div>
-                          <div>
-                            <p className="font-medium group-hover:text-primary transition-colors">
-                              {form.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {form.isPublished ? 'Publié' : 'Brouillon'}
-                              {form.lastResponse && ` • Dernière: ${format(new Date(form.lastResponse), 'dd MMM', { locale: fr })}`}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{form.responses}</Badge>
-                          <ArrowUpRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                      </Link>
-                    ))}
+                  <div className="p-2 bg-purple-100 dark:bg-purple-900/20 rounded-lg">
+                    <Target className="w-4 h-4 text-purple-600" />
                   </div>
-                ) : (
-                  <div className="h-[200px] flex items-center justify-center text-muted-foreground">
-                    Aucun formulaire
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Form Distribution Pie */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-primary" />
                   Distribution des réponses
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[280px]">
+                <div className="h-[200px]">
                   {formDistribution.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -487,8 +543,8 @@ export default function Analytics() {
                           data={formDistribution}
                           cx="50%"
                           cy="50%"
-                          innerRadius={60}
-                          outerRadius={100}
+                          innerRadius={50}
+                          outerRadius={80}
                           paddingAngle={2}
                           dataKey="value"
                         >
@@ -497,12 +553,15 @@ export default function Analytics() {
                           ))}
                         </Pie>
                         <Tooltip 
+                          formatter={(value, name) => {
+                            const entry = formDistribution.find(f => f.name === name);
+                            return [`${value} réponses (${entry?.percentage || 0}%)`, name];
+                          }}
                           contentStyle={{ 
                             backgroundColor: 'hsl(var(--card))', 
                             border: '1px solid hsl(var(--border))',
                             borderRadius: '8px'
                           }}
-                          formatter={(value: number, name: string) => [`${value} réponses (${formDistribution.find(f => f.name === name)?.percentage}%)`, name]}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -514,14 +573,15 @@ export default function Analytics() {
                 </div>
                 {/* Legend */}
                 {formDistribution.length > 0 && (
-                  <div className="flex flex-wrap gap-3 justify-center mt-2">
+                  <div className="mt-4 space-y-2">
                     {formDistribution.map((form, index) => (
                       <div key={index} className="flex items-center gap-2 text-sm">
                         <div 
-                          className="w-3 h-3 rounded-full" 
+                          className="w-3 h-3 rounded-full flex-shrink-0" 
                           style={{ backgroundColor: form.color }}
                         />
-                        <span className="text-muted-foreground">{form.name}</span>
+                        <span className="text-muted-foreground truncate">{form.name}</span>
+                        <span className="ml-auto font-medium">{form.percentage}%</span>
                       </div>
                     ))}
                   </div>
@@ -530,6 +590,65 @@ export default function Analytics() {
             </Card>
           </motion.div>
         </div>
+
+        {/* Popular Forms */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7 }}
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <div className="p-2 bg-orange-100 dark:bg-orange-900/20 rounded-lg">
+                  <FileText className="w-4 h-4 text-orange-600" />
+                </div>
+                Formulaires populaires
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {popularForms.length > 0 ? (
+                <div className="space-y-3">
+                  {popularForms.map((form, index) => (
+                    <Link 
+                      key={form.id}
+                      to={`/dashboard/forms/${form.id}/responses`}
+                      className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        >
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium group-hover:text-primary transition-colors">
+                            {form.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            <Badge variant={form.isPublished ? 'default' : 'secondary'} className="mr-2 text-xs">
+                              {form.isPublished ? 'Publié' : 'Brouillon'}
+                            </Badge>
+                            {form.lastResponse && `Dernière: ${format(new Date(form.lastResponse), 'dd MMM', { locale: fr })}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-bold">{form.responses}</span>
+                        <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  Aucun formulaire créé
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
     </DashboardLayout>
   );
