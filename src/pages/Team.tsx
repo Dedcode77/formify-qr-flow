@@ -35,7 +35,8 @@ import {
   Trash2, 
   Loader2,
   Mail,
-  MoreVertical
+  MoreVertical,
+  Clock
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -150,18 +151,95 @@ export default function Team() {
     },
   });
 
-  // Invite member (placeholder - would need edge function for email)
+  // Fetch pending invitations
+  const { data: pendingInvitations, isLoading: invitationsLoading } = useQuery({
+    queryKey: ['pending-invitations', organization?.id],
+    queryFn: async () => {
+      if (!organization?.id) return [];
+      
+      const { data, error } = await supabase
+        .from('team_invitations')
+        .select('*')
+        .eq('organization_id', organization.id)
+        .is('accepted_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!organization?.id && isAdmin,
+  });
+
+  // Send invitation mutation
+  const inviteMutation = useMutation({
+    mutationFn: async ({ email, role }: { email: string; role: string }) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      
+      const response = await supabase.functions.invoke('send-team-invitation', {
+        body: { 
+          email, 
+          role, 
+          organizationId: organization?.id,
+          organizationName: organization?.name 
+        },
+        headers: {
+          Authorization: `Bearer ${sessionData.session?.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Erreur lors de l\'envoi');
+      }
+
+      const data = response.data;
+      if (!data.success) {
+        throw new Error(data.error || 'Erreur inconnue');
+      }
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-invitations'] });
+      toast.success('Invitation envoyée avec succès !');
+      setIsInviteDialogOpen(false);
+      setInviteEmail('');
+      setInviteRole('user');
+    },
+    onError: (error: any) => {
+      console.error('Error sending invitation:', error);
+      toast.error(error.message || 'Erreur lors de l\'envoi de l\'invitation');
+    },
+  });
+
+  // Cancel invitation mutation
+  const cancelInvitationMutation = useMutation({
+    mutationFn: async (invitationId: string) => {
+      const { error } = await supabase
+        .from('team_invitations')
+        .delete()
+        .eq('id', invitationId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-invitations'] });
+      toast.success('Invitation annulée');
+    },
+    onError: (error) => {
+      console.error('Error canceling invitation:', error);
+      toast.error('Erreur lors de l\'annulation');
+    },
+  });
+
+  // Invite member handler
   const handleInvite = async () => {
     if (!inviteEmail.trim()) {
       toast.error('Veuillez entrer une adresse email');
       return;
     }
     
-    // For now, show a message that this feature needs backend implementation
-    toast.info('Fonctionnalité d\'invitation par email bientôt disponible. Contactez l\'utilisateur pour qu\'il s\'inscrive d\'abord.');
-    setIsInviteDialogOpen(false);
-    setInviteEmail('');
-    setInviteRole('user');
+    inviteMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
   };
 
   const handleRoleChange = (memberId: string, newRole: string) => {
@@ -282,12 +360,16 @@ export default function Team() {
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)}>
+                  <Button variant="outline" onClick={() => setIsInviteDialogOpen(false)} disabled={inviteMutation.isPending}>
                     Annuler
                   </Button>
-                  <Button onClick={handleInvite}>
-                    <Mail className="w-4 h-4 mr-2" />
-                    Envoyer l'invitation
+                  <Button onClick={handleInvite} disabled={inviteMutation.isPending}>
+                    {inviteMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4 mr-2" />
+                    )}
+                    {inviteMutation.isPending ? 'Envoi...' : 'Envoyer l\'invitation'}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -455,7 +537,64 @@ export default function Team() {
           </CardContent>
         </Card>
 
-        {/* Info card for non-admins */}
+        {/* Pending Invitations */}
+        {isAdmin && pendingInvitations && pendingInvitations.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="w-5 h-5" />
+                Invitations en attente
+              </CardTitle>
+              <CardDescription>
+                {pendingInvitations.length} invitation{pendingInvitations.length > 1 ? 's' : ''} en attente de réponse
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {pendingInvitations.map((invitation, index) => (
+                  <motion.div
+                    key={invitation.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="flex items-center justify-between p-4 rounded-lg border border-dashed border-primary/30 bg-primary/5"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{invitation.email}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Invité le {format(new Date(invitation.created_at), 'dd MMM yyyy', { locale: fr })}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline" className="border-primary/30">
+                        {invitation.role === 'admin' ? 'Admin' : 'Membre'}
+                      </Badge>
+                      <Badge variant="secondary" className="text-xs">
+                        Expire le {format(new Date(invitation.expires_at), 'dd MMM', { locale: fr })}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => cancelInvitationMutation.mutate(invitation.id)}
+                        disabled={cancelInvitationMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {!isAdmin && (
           <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
             <CardContent className="p-4 flex items-start gap-3">
