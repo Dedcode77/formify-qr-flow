@@ -14,6 +14,7 @@ import Attendance from "./pages/Attendance";
 import PublicForm from "./pages/PublicForm";
 import Settings from "./pages/Settings";
 import Team from "./pages/Team";
+import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,7 @@ const App = () => (
           <Route path="/dashboard/settings" element={<Settings />} />
           <Route path="/dashboard/team" element={<Team />} />
           <Route path="/f/:slug" element={<PublicForm />} />
+          <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/pricing" element={<Index />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
