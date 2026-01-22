@@ -68,6 +68,94 @@ export default function Settings() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
+  // Avatar upload state
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  // Handle avatar upload
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast({
+        title: 'Format invalide',
+        description: 'Veuillez sélectionner une image JPG, PNG, GIF ou WebP.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate file size (2MB max)
+    if (file.size > 2 * 1024 * 1024) {
+      toast({
+        title: 'Fichier trop volumineux',
+        description: 'La taille maximum est de 2MB.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+
+    try {
+      // Generate unique file path
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/avatar-${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, {
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      const newAvatarUrl = urlData.publicUrl;
+
+      // Update profile with new avatar URL
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: newAvatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setAvatarUrl(newAvatarUrl);
+
+      toast({
+        title: 'Photo mise à jour',
+        description: 'Votre photo de profil a été changée avec succès.',
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de télécharger la photo. Veuillez réessayer.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+      // Reset file input
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
   // Update profile mutation
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
@@ -315,12 +403,28 @@ export default function Settings() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="space-y-2">
-                    <Button variant="outline" size="sm">
-                      <Upload className="w-4 h-4 mr-2" />
-                      Changer la photo
+                    <input
+                      type="file"
+                      id="avatar-upload"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => document.getElementById('avatar-upload')?.click()}
+                      disabled={isUploadingAvatar}
+                    >
+                      {isUploadingAvatar ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4 mr-2" />
+                      )}
+                      {isUploadingAvatar ? 'Téléchargement...' : 'Changer la photo'}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      JPG, PNG ou GIF. Max 2MB.
+                      JPG, PNG, GIF ou WebP. Max 2MB.
                     </p>
                   </div>
                 </div>
