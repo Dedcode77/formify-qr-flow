@@ -185,20 +185,35 @@ export default function Settings() {
     mutationFn: async () => {
       if (!user) throw new Error('Non authentifié');
       
-      // Delete user's profile first
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user.id);
+      // Get the current session token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Session invalide');
+      }
 
-      if (profileError) throw profileError;
+      // Call the edge function to delete the account
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-account`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        }
+      );
 
-      // Sign out the user (account deletion requires admin privileges in Supabase)
-      // For now, we'll sign out and clear the data. Full account deletion would require an edge function with service role
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) throw signOutError;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erreur lors de la suppression du compte');
+      }
+
+      return data;
     },
     onSuccess: () => {
+      setIsDeleteDialogOpen(false);
+      setDeleteConfirmText('');
       toast({
         title: 'Compte supprimé',
         description: 'Votre compte a été supprimé avec succès.',
