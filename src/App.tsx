@@ -14,6 +14,7 @@ import Attendance from "./pages/Attendance";
 import PublicForm from "./pages/PublicForm";
 import Settings from "./pages/Settings";
 import Team from "./pages/Team";
+import Pricing from "./pages/Pricing";
 import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
 
@@ -39,7 +40,7 @@ const App = () => (
           <Route path="/dashboard/team" element={<Team />} />
           <Route path="/f/:slug" element={<PublicForm />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
-          <Route path="/pricing" element={<Index />} />
+          <Route path="/pricing" element={<Pricing />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
