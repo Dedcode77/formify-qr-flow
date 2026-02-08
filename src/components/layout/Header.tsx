@@ -1,14 +1,15 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { FileSpreadsheet, Menu, X } from 'lucide-react';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { FileSpreadsheet, Menu, X, User } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/hooks/useAuth';
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, profile } = useAuth();
   
   const isLanding = location.pathname === '/';
 
@@ -46,7 +47,13 @@ export function Header() {
           {/* Desktop CTA */}
           <div className="hidden md:flex items-center gap-3">
             {isAuthenticated ? (
-              <Link to="/dashboard">
+              <Link to="/dashboard" className="flex items-center gap-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={profile?.avatar_url || undefined} alt="Avatar" />
+                  <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                    {profile?.full_name?.charAt(0)?.toUpperCase() || <User className="w-4 h-4" />}
+                  </AvatarFallback>
+                </Avatar>
                 <Button>Tableau de bord</Button>
               </Link>
             ) : (
