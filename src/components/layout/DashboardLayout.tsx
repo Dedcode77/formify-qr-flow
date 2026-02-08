@@ -15,6 +15,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
 interface DashboardLayoutProps {
@@ -110,15 +111,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* User section */}
         <div className="p-4 border-t">
-          {!isCollapsed && (
-            <div className="mb-4 p-3 rounded-lg bg-muted/50">
-              <p className="font-medium text-sm truncate">{displayName}</p>
-              <p className="text-xs text-muted-foreground truncate">{orgName}</p>
-              <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary capitalize">
-                {plan}
-              </span>
-            </div>
-          )}
+          <div className={cn("mb-4 p-3 rounded-lg bg-muted/50 flex items-center gap-3", isCollapsed && "justify-center p-2")}>
+            <Avatar className={cn("h-9 w-9 flex-shrink-0", isCollapsed && "h-8 w-8")}>
+              <AvatarImage src={profile?.avatar_url || undefined} alt="Avatar" />
+              <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                {displayName.charAt(0).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            {!isCollapsed && (
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate">{displayName}</p>
+                <p className="text-xs text-muted-foreground truncate">{orgName}</p>
+                <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary capitalize">
+                  {plan}
+                </span>
+              </div>
+            )}
+          </div>
           
           <Button
             variant="ghost"
